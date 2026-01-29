@@ -1,5 +1,5 @@
 """
-Configuration for Absorption & Momentum Monitors.
+Configuration for Absorption Monitor.
 Edit these values to adjust detection sensitivity.
 """
 
@@ -13,9 +13,9 @@ SYMBOL = "ES"
 EXCHANGE = "CME"
 
 # Detection Thresholds
-DELTA_THRESHOLD = 50  # Min cumulative delta (contracts) to trigger alert
+DELTA_THRESHOLD = 100  # Min cumulative delta (contracts) to trigger alert
 TICK_THRESHOLD = 1  # Max price move in ticks for absorption (1 tick = 0.25 pts)
-WINDOW_SECONDS = 3.0  # Rolling window for tape analysis
+WINDOW_SECONDS = 5.0  # Rolling window for tape analysis
 
 # Rolling Average (relative volume detection)
 BASELINE_WINDOW_SECONDS = 60.0  # Longer window to calculate "normal" volume
@@ -23,7 +23,3 @@ DELTA_MULTIPLIER = 1.5  # Trigger when delta is Nx the baseline average
 
 # ES tick size (do not change)
 TICK_SIZE = 0.25
-
-# Momentum Monitor Specific
-MOMENTUM_WINDOW_SECONDS = 5.0  # Longer window for momentum detection
-MOMENTUM_TICK_THRESHOLD = 2  # Min price move in ticks for momentum (2 ticks = 1 pt)

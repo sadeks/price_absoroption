@@ -35,6 +35,19 @@ class TickData:
     side: str  # 'BUY' (at ask), 'SELL' (at bid), or 'MID' (between)
 
 
+@dataclass
+class SignalTracker:
+    """Tracks a signal's performance after triggering."""
+
+    signal_type: str  # 'BUY' or 'SELL'
+    entry_price: float
+    entry_time: float
+    max_profit_points: float = 0.0  # Max favorable move in points
+    max_drawdown_points: float = 0.0  # Max adverse move in points
+    delta: int = 0
+    extra_info: str = ""
+
+
 class AbsorptionMonitor:
     """Monitors ES futures tape for passive absorption patterns."""
 
@@ -95,6 +108,11 @@ class AbsorptionMonitor:
         self.buy_absorption_sound = os.path.join(self.sounds_dir, "buy_absorption.wav")
         self.sell_absorption_sound = os.path.join(self.sounds_dir, "sell_absorption.wav")
 
+        # Signal analytics tracking
+        self.active_signals: list[SignalTracker] = []
+        self.signal_track_duration: float = 300.0  # Track for 5 minutes after signal
+        self.analytics_file = os.path.join(os.path.dirname(__file__), "absorption_analytics.txt")
+
     async def connect(self) -> bool:
         """Connect to IBKR TWS/Gateway."""
         try:
@@ -108,6 +126,13 @@ class AbsorptionMonitor:
 
     def disconnect(self):
         """Disconnect from IBKR."""
+        # Finalize any remaining active signals
+        if self.active_signals:
+            print(f"\n[Analytics] Finalizing {len(self.active_signals)} remaining signal(s)...")
+            for signal in self.active_signals:
+                self._finalize_signal(signal)
+            self.active_signals.clear()
+
         if self.connected:
             self.ib.disconnect()
             self.connected = False
@@ -178,6 +203,10 @@ class AbsorptionMonitor:
 
         # Check for absorption
         self._check_absorption()
+
+        # Update signal analytics with current price
+        if self.tape and self.active_signals:
+            self._update_signal_analytics(self.tape[-1].price)
 
     def _prune_old_ticks(self):
         """Remove ticks older than the window."""
@@ -273,6 +302,8 @@ class AbsorptionMonitor:
         extra_str = f" | {extra}" if extra else ""
         print(f"[{timestamp}] 🔴 SELL ABSORPTION @ {price:.2f} | Delta: +{delta} | Price Δ: {price_change:+.2f} ticks{extra_str}")
         self._play_sound(self.sell_absorption_sound)
+        # Start tracking for analytics
+        self._start_tracking_signal("SELL", price, delta, extra)
 
     def _alert_buy_absorption(self, delta: int, price_change: float, price: float, extra: str = ""):
         """Alert for buy absorption (buyers absorbing sells - bullish)."""
@@ -280,6 +311,91 @@ class AbsorptionMonitor:
         extra_str = f" | {extra}" if extra else ""
         print(f"[{timestamp}] 🟢 BUY ABSORPTION @ {price:.2f} | Delta: {delta} | Price Δ: {price_change:+.2f} ticks{extra_str}")
         self._play_sound(self.buy_absorption_sound)
+        # Start tracking for analytics
+        self._start_tracking_signal("BUY", price, delta, extra)
+
+    def _update_signal_analytics(self, current_price: float):
+        """Update all active signals with current price and finalize expired ones."""
+        now = time.time()
+        signals_to_finalize = []
+
+        for signal in self.active_signals:
+            # Calculate price move from entry
+            price_move = current_price - signal.entry_price
+
+            if signal.signal_type == "BUY":
+                # BUY signal: profit when price goes up, drawdown when price goes down
+                if price_move > signal.max_profit_points:
+                    signal.max_profit_points = price_move
+                if price_move < 0 and abs(price_move) > signal.max_drawdown_points:
+                    signal.max_drawdown_points = abs(price_move)
+            else:  # SELL signal
+                # SELL signal: profit when price goes down, drawdown when price goes up
+                if price_move < 0 and abs(price_move) > signal.max_profit_points:
+                    signal.max_profit_points = abs(price_move)
+                if price_move > 0 and price_move > signal.max_drawdown_points:
+                    signal.max_drawdown_points = price_move
+
+            # Check if signal tracking period has expired
+            if now - signal.entry_time >= self.signal_track_duration:
+                signals_to_finalize.append(signal)
+
+        # Finalize expired signals
+        for signal in signals_to_finalize:
+            self._finalize_signal(signal)
+            self.active_signals.remove(signal)
+
+    def _finalize_signal(self, signal: SignalTracker):
+        """Write final signal analytics to file."""
+        entry_time_str = datetime.fromtimestamp(signal.entry_time).strftime("%Y-%m-%d %H:%M:%S")
+
+        # Calculate profit/drawdown ratio
+        if signal.max_drawdown_points > 0:
+            ratio_str = f"{signal.max_profit_points / signal.max_drawdown_points:.2f}x"
+        else:
+            ratio_str = "N/A (no drawdown)"
+
+        line = (
+            f"{entry_time_str} | {signal.signal_type:4} | "
+            f"Entry: {signal.entry_price:.2f} | "
+            f"Delta: {signal.delta:+d} | "
+            f"Max Profit: {signal.max_profit_points:.2f} pts | "
+            f"Max Drawdown: {signal.max_drawdown_points:.2f} pts | "
+            f"Profit/DD Ratio: {ratio_str}"
+        )
+
+        # Append to file
+        try:
+            with open(self.analytics_file, "a") as f:
+                f.write(line + "\n")
+            print(f"[Analytics] {signal.signal_type} signal finalized: Profit={signal.max_profit_points:.2f} pts, DD={signal.max_drawdown_points:.2f} pts")
+        except Exception as e:
+            print(f"[Analytics] Error writing to file: {e}")
+
+    def _start_tracking_signal(self, signal_type: str, entry_price: float, delta: int, extra: str = ""):
+        """Start tracking a new signal for analytics. Finalizes opposite signals only."""
+        # Finalize signals of the OPPOSITE type when a new signal triggers
+        opposite_type = "SELL" if signal_type == "BUY" else "BUY"
+        signals_to_keep = []
+
+        for signal in self.active_signals:
+            if signal.signal_type == opposite_type:
+                # Opposite signal - finalize it
+                self._finalize_signal(signal)
+            else:
+                # Same signal type - keep tracking it
+                signals_to_keep.append(signal)
+
+        self.active_signals = signals_to_keep
+
+        signal = SignalTracker(
+            signal_type=signal_type,
+            entry_price=entry_price,
+            entry_time=time.time(),
+            delta=delta,
+            extra_info=extra,
+        )
+        self.active_signals.append(signal)
 
     def _play_sound(self, sound_file: str):
         """Play alert sound (macOS)."""
@@ -327,6 +443,8 @@ class AbsorptionMonitor:
         print(f"  Delta threshold: {self.delta_threshold} contracts (or {self.delta_multiplier}x baseline)")
         print(f"  Tick threshold: {self.tick_threshold} ticks")
         print(f"  Window: {self.window_seconds}s | Baseline: {self.baseline_window_seconds}s")
+        track_min = self.signal_track_duration / 60
+        print(f"  Analytics: tracking signals for {track_min:.0f} min (or until next signal) -> {self.analytics_file}")
         print()
 
         # Main polling loop

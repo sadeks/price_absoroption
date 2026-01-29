@@ -1,0 +1,4 @@
+2026-01-29 14:18:21 | SELL | Entry: 6970.50 | Delta: +187 | Max Profit: 2.75 pts | Max Drawdown: 1.75 pts | Profit/DD Ratio: 1.57x
+2026-01-29 14:18:21 | SELL | Entry: 6970.50 | Delta: +163 | Max Profit: 2.75 pts | Max Drawdown: 1.75 pts | Profit/DD Ratio: 1.57x
+2026-01-29 14:18:22 | SELL | Entry: 6970.50 | Delta: +163 | Max Profit: 2.75 pts | Max Drawdown: 1.75 pts | Profit/DD Ratio: 1.57x
+2026-01-29 14:18:22 | SELL | Entry: 6970.50 | Delta: +163 | Max Profit: 2.75 pts | Max Drawdown: 1.75 pts | Profit/DD Ratio: 1.57x
