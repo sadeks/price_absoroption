@@ -19,8 +19,6 @@ async def run_absorption():
         delta_threshold=config.DELTA_THRESHOLD,
         tick_threshold=config.TICK_THRESHOLD,
         window_seconds=config.WINDOW_SECONDS,
-        baseline_window_seconds=config.BASELINE_WINDOW_SECONDS,
-        delta_multiplier=config.DELTA_MULTIPLIER,
     )
     await monitor.start_monitoring()
 
