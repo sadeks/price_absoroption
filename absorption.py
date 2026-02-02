@@ -57,9 +57,12 @@ class AbsorptionMonitor:
         client_id: int = 99,
         symbol: str = "ES",
         exchange: str = "CME",
-        delta_threshold: int = 100,
         tick_threshold: float = 0.5,
         window_seconds: float = 5.0,
+        baseline_window_seconds: float = 60.0,
+        delta_multiplier: float = 2.0,
+        min_delta: int = 30,
+        cooldown_seconds: float = 10.0,
     ):
         self.host = host
         self.port = port
@@ -68,9 +71,16 @@ class AbsorptionMonitor:
         self.exchange = exchange
 
         # Detection thresholds
-        self.delta_threshold = delta_threshold  # Minimum delta to trigger
         self.tick_threshold = tick_threshold  # Max price move (in ticks) to consider absorption
         self.window_seconds = window_seconds  # Rolling window size
+        self.baseline_window_seconds = baseline_window_seconds  # Window for calculating average
+        self.delta_multiplier = delta_multiplier  # Trigger when delta is Nx the average
+        self.min_delta = min_delta  # Minimum absolute delta to trigger (prevents low-volume noise)
+        self.cooldown_seconds = cooldown_seconds  # Minimum time between signals of the same type
+
+        # Cooldown tracking
+        self.last_buy_signal_time: float = 0
+        self.last_sell_signal_time: float = 0
 
 
         # ES tick size
@@ -86,6 +96,9 @@ class AbsorptionMonitor:
         # Status print timing
         self.last_status_print: float = 0
         self.status_interval: float = 10.0  # Print status every 10 seconds
+
+        # Baseline tape - longer window for rolling average
+        self.baseline_tape: deque[TickData] = deque()
 
         # Track processed ticks to avoid duplicates
         self.last_processed_idx = 0
@@ -186,6 +199,7 @@ class AbsorptionMonitor:
 
             tick_data = TickData(timestamp=time.time(), price=price, size=size, side=side)
             self.tape.append(tick_data)
+            self.baseline_tape.append(tick_data)
 
         # Prune old ticks
         self._prune_old_ticks()
@@ -203,11 +217,52 @@ class AbsorptionMonitor:
         while self.tape and self.tape[0].timestamp < cutoff:
             self.tape.popleft()
 
+        # Prune baseline tape with longer window
+        baseline_cutoff = time.time() - self.baseline_window_seconds
+        while self.baseline_tape and self.baseline_tape[0].timestamp < baseline_cutoff:
+            self.baseline_tape.popleft()
+
     def _calculate_delta(self) -> int:
         """Calculate cumulative delta (buys - sells) in the window."""
         buy_volume = sum(t.size for t in self.tape if t.side == "BUY")
         sell_volume = sum(t.size for t in self.tape if t.side == "SELL")
         return buy_volume - sell_volume
+
+    def _calculate_avg_delta(self) -> float:
+        """Calculate average absolute delta per window over the baseline period."""
+        if len(self.baseline_tape) < 2:
+            return 0.0
+
+        # Time span of baseline data
+        start_time = self.baseline_tape[0].timestamp
+        end_time = self.baseline_tape[-1].timestamp
+        time_span = end_time - start_time
+        if time_span <= 0:
+            return 0.0
+
+        # Group ticks into windows and calculate absolute delta for each
+        window_deltas = []
+        window_start = start_time
+
+        while window_start < end_time:
+            window_end = window_start + self.window_seconds
+
+            # Calculate delta for this window
+            buy_volume = sum(t.size for t in self.baseline_tape
+                           if window_start <= t.timestamp < window_end and t.side == "BUY")
+            sell_volume = sum(t.size for t in self.baseline_tape
+                            if window_start <= t.timestamp < window_end and t.side == "SELL")
+            window_delta = abs(buy_volume - sell_volume)
+
+            if buy_volume > 0 or sell_volume > 0:  # Only count windows with activity
+                window_deltas.append(window_delta)
+
+            window_start = window_end
+
+        if not window_deltas:
+            return 0.0
+
+        return sum(window_deltas) / len(window_deltas)
 
     def _calculate_price_change(self) -> float:
         """Calculate price change in ticks over the window."""
@@ -227,12 +282,20 @@ class AbsorptionMonitor:
         delta = self._calculate_delta()
         price_change_ticks = self._calculate_price_change()
         current_price = self.tape[-1].price
+        avg_delta = self._calculate_avg_delta()
+        now = time.time()
+
+        # Calculate threshold based on average (must meet BOTH multiplier AND min_delta)
+        multiplier_threshold = avg_delta * self.delta_multiplier if avg_delta > 0 else float('inf')
+        threshold = max(multiplier_threshold, self.min_delta)
+
+        # Calculate multiple of average
+        multiple = abs(delta) / avg_delta if avg_delta > 0 else 0
 
         # Print status periodically
-        now = time.time()
         if now - self.last_status_print >= self.status_interval:
             timestamp = datetime.now().strftime("%H:%M:%S")
-            print(f"[{timestamp}] Current delta: {delta:+d}")
+            print(f"[{timestamp}] Delta: {delta:+d} | Avg: {avg_delta:.0f} | Multiple: {multiple:.1f}x | Threshold: {threshold:.0f} ({self.delta_multiplier}x or min {self.min_delta})")
             self.last_status_print = now
 
         # Delta-based absorption detection
@@ -241,26 +304,32 @@ class AbsorptionMonitor:
 
         # Sell Absorption (bearish signal):
         # Lots of aggressive buying (positive delta) but price not going up
-        if delta >= self.delta_threshold and price_stayed_flat:
-            self._alert_sell_absorption(delta, price_change_ticks, current_price)
+        if delta >= threshold and price_stayed_flat:
+            # Check cooldown
+            if now - self.last_sell_signal_time >= self.cooldown_seconds:
+                self._alert_sell_absorption(delta, price_change_ticks, current_price, multiple)
+                self.last_sell_signal_time = now
 
         # Buy Absorption (bullish signal):
         # Lots of aggressive selling (negative delta) but price not going down
-        elif delta <= -self.delta_threshold and price_stayed_flat:
-            self._alert_buy_absorption(delta, price_change_ticks, current_price)
+        elif delta <= -threshold and price_stayed_flat:
+            # Check cooldown
+            if now - self.last_buy_signal_time >= self.cooldown_seconds:
+                self._alert_buy_absorption(delta, price_change_ticks, current_price, multiple)
+                self.last_buy_signal_time = now
 
-    def _alert_sell_absorption(self, delta: int, price_change: float, price: float):
+    def _alert_sell_absorption(self, delta: int, price_change: float, price: float, multiple: float):
         """Alert for sell absorption (sellers absorbing buys - bearish)."""
         timestamp = datetime.now().strftime("%H:%M:%S")
-        print(f"[{timestamp}] 🔴 SELL ABSORPTION @ {price:.2f} | Delta: +{delta} | Price Δ: {price_change:+.2f} ticks")
+        print(f"[{timestamp}] 🔴 SELL ABSORPTION @ {price:.2f} | Delta: +{delta} ({multiple:.1f}x avg) | Price Δ: {price_change:+.2f} ticks")
         self._play_sound(self.sell_absorption_sound)
         # Start tracking for analytics
         self._start_tracking_signal("SELL", price, delta)
 
-    def _alert_buy_absorption(self, delta: int, price_change: float, price: float):
+    def _alert_buy_absorption(self, delta: int, price_change: float, price: float, multiple: float):
         """Alert for buy absorption (buyers absorbing sells - bullish)."""
         timestamp = datetime.now().strftime("%H:%M:%S")
-        print(f"[{timestamp}] 🟢 BUY ABSORPTION @ {price:.2f} | Delta: {delta} | Price Δ: {price_change:+.2f} ticks")
+        print(f"[{timestamp}] 🟢 BUY ABSORPTION @ {price:.2f} | Delta: {delta} ({multiple:.1f}x avg) | Price Δ: {price_change:+.2f} ticks")
         self._play_sound(self.buy_absorption_sound)
         # Start tracking for analytics
         self._start_tracking_signal("BUY", price, delta)
@@ -390,9 +459,10 @@ class AbsorptionMonitor:
         await asyncio.sleep(1)
 
         print(f"[{datetime.now().strftime('%H:%M:%S')}] Monitoring {contract.localSymbol} tape...")
-        print(f"  Delta threshold: {self.delta_threshold} contracts")
+        print(f"  Delta: {self.delta_multiplier}x average OR min {self.min_delta} contracts")
         print(f"  Tick threshold: {self.tick_threshold} ticks")
-        print(f"  Window: {self.window_seconds}s")
+        print(f"  Window: {self.window_seconds}s | Baseline: {self.baseline_window_seconds}s")
+        print(f"  Cooldown: {self.cooldown_seconds}s between signals")
         track_min = self.signal_track_duration / 60
         print(f"  Analytics: tracking signals for {track_min:.0f} min (or until opposite signal) -> {self.analytics_file}")
         print()

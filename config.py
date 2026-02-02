@@ -13,9 +13,12 @@ SYMBOL = "ES"
 EXCHANGE = "CME"
 
 # Detection Thresholds
-DELTA_THRESHOLD = 99  # Min cumulative delta (contracts) to trigger alert
 TICK_THRESHOLD = 1  # Max price move in ticks for absorption (1 tick = 0.25 pts)
-WINDOW_SECONDS = 5.0  # Rolling window for tape analysis
+WINDOW_SECONDS = 3.0  # Rolling window for tape analysis
+BASELINE_WINDOW_SECONDS = 60.0  # Longer window to calculate average delta
+DELTA_MULTIPLIER = 3  # Trigger when delta is Nx the average (e.g., 2x or 3x)
+MIN_DELTA = 100  # Minimum absolute delta to trigger (prevents low-volume noise overnight)
+COOLDOWN_SECONDS = 1.0  # Minimum seconds between signals of same type (prevents duplicates)
 
 # ES tick size (do not change)
 TICK_SIZE = 0.25
