@@ -1,2 +1,2 @@
-"""AggressiveBuySell - ES Futures Passive Absorption Monitor"""
-from .monitor import AbsorptionMonitor
+"""Stock Absorption Monitor"""
+from .absorption import AbsorptionMonitor

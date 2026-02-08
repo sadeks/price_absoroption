@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-AggressiveBuySell Monitor
-Detects passive absorption in ES futures by analyzing tape data.
+Stock Absorption Monitor
+Detects passive absorption in stocks by analyzing tape data.
 
 Passive Absorption Detection:
 - Sell Absorption (bearish): High positive delta (lots of buying) but price doesn't go up
@@ -22,7 +22,7 @@ import os
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from ib_async import IB, Future
+from ib_async import IB, Stock
 
 
 @dataclass
@@ -48,15 +48,15 @@ class SignalTracker:
 
 
 class AbsorptionMonitor:
-    """Monitors ES futures tape for passive absorption patterns."""
+    """Monitors stock tape for passive absorption patterns."""
 
     def __init__(
         self,
         host: str = "127.0.0.1",
         port: int = 7496,
         client_id: int = 99,
-        symbol: str = "ES",
-        exchange: str = "CME",
+        symbol: str = "SPY",
+        exchange: str = "SMART",
         tick_threshold: float = 0.5,
         window_seconds: float = 5.0,
         baseline_window_seconds: float = 60.0,
@@ -71,7 +71,7 @@ class AbsorptionMonitor:
         self.exchange = exchange
 
         # Detection thresholds
-        self.tick_threshold = tick_threshold  # Max price move (in ticks) to consider absorption
+        self.tick_threshold = tick_threshold  # Max price move (in points) to consider absorption
         self.window_seconds = window_seconds  # Rolling window size
         self.baseline_window_seconds = baseline_window_seconds  # Window for calculating average
         self.delta_multiplier = delta_multiplier  # Trigger when delta is Nx the average
@@ -83,8 +83,8 @@ class AbsorptionMonitor:
         self.last_sell_signal_time: float = 0
 
 
-        # ES tick size
-        self.tick_size = 0.25
+        # Tick size (0.01 for most stocks)
+        self.tick_size = 0.01
 
         # IB connection
         self.ib = IB()
@@ -141,18 +141,16 @@ class AbsorptionMonitor:
             self.connected = False
             print("Disconnected from IBKR")
 
-    async def _get_front_month_contract(self) -> Future:
-        """Get the front month ES contract."""
-        contract = Future(self.symbol, exchange=self.exchange)
+    async def _get_contract(self) -> Stock:
+        """Get the stock contract."""
+        contract = Stock(self.symbol, "SMART", "USD")
         details = await self.ib.reqContractDetailsAsync(contract)
         if not details:
             raise ValueError(f"No contract found for {self.symbol}")
 
-        # Sort by expiry and get front month
-        sorted_details = sorted(details, key=lambda d: d.contract.lastTradeDateOrContractMonth)
-        front_month = sorted_details[0].contract
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] Using contract: {front_month.localSymbol}")
-        return front_month
+        resolved_contract = details[0].contract
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Using contract: {resolved_contract.symbol}")
+        return resolved_contract
 
     def _process_new_ticks(self, mkt_ticker, tbt_ticker):
         """Process new tick-by-tick trades."""
@@ -265,14 +263,14 @@ class AbsorptionMonitor:
         return sum(window_deltas) / len(window_deltas)
 
     def _calculate_price_change(self) -> float:
-        """Calculate price change in ticks over the window."""
+        """Calculate price change in points over the window."""
         if len(self.tape) < 2:
             return 0.0
 
         first_price = self.tape[0].price
         last_price = self.tape[-1].price
         price_change = last_price - first_price
-        return price_change / self.tick_size  # Convert to ticks
+        return price_change / self.tick_size  # Convert to points
 
     def _check_absorption(self):
         """Check for absorption patterns and alert."""
@@ -321,7 +319,7 @@ class AbsorptionMonitor:
     def _alert_sell_absorption(self, delta: int, price_change: float, price: float, multiple: float):
         """Alert for sell absorption (sellers absorbing buys - bearish)."""
         timestamp = datetime.now().strftime("%H:%M:%S")
-        print(f"[{timestamp}] 🔴 SELL ABSORPTION @ {price:.2f} | Delta: +{delta} ({multiple:.1f}x avg) | Price Δ: {price_change:+.2f} ticks")
+        print(f"[{timestamp}] 🔴 SELL ABSORPTION @ {price:.2f} | Delta: +{delta} ({multiple:.1f}x avg) | Price Δ: {price_change:+.2f} pts")
         self._play_sound(self.sell_absorption_sound)
         # Start tracking for analytics
         self._start_tracking_signal("SELL", price, delta)
@@ -329,7 +327,7 @@ class AbsorptionMonitor:
     def _alert_buy_absorption(self, delta: int, price_change: float, price: float, multiple: float):
         """Alert for buy absorption (buyers absorbing sells - bullish)."""
         timestamp = datetime.now().strftime("%H:%M:%S")
-        print(f"[{timestamp}] 🟢 BUY ABSORPTION @ {price:.2f} | Delta: {delta} ({multiple:.1f}x avg) | Price Δ: {price_change:+.2f} ticks")
+        print(f"[{timestamp}] 🟢 BUY ABSORPTION @ {price:.2f} | Delta: {delta} ({multiple:.1f}x avg) | Price Δ: {price_change:+.2f} pts")
         self._play_sound(self.buy_absorption_sound)
         # Start tracking for analytics
         self._start_tracking_signal("BUY", price, delta)
@@ -446,8 +444,8 @@ class AbsorptionMonitor:
             if not await self.connect():
                 return
 
-        # Get front month contract
-        contract = await self._get_front_month_contract()
+        # Get stock contract
+        contract = await self._get_contract()
 
         # Subscribe to market data for bid/ask
         mkt_ticker = self.ib.reqMktData(contract, "", False, False)
@@ -458,9 +456,9 @@ class AbsorptionMonitor:
         # Wait for initial data
         await asyncio.sleep(1)
 
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] Monitoring {contract.localSymbol} tape...")
-        print(f"  Delta: {self.delta_multiplier}x average OR min {self.min_delta} contracts")
-        print(f"  Tick threshold: {self.tick_threshold} ticks")
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Monitoring {contract.symbol} tape...")
+        print(f"  Delta: {self.delta_multiplier}x average OR min {self.min_delta} shares")
+        print(f"  Price threshold: {self.tick_threshold} pts")
         print(f"  Window: {self.window_seconds}s | Baseline: {self.baseline_window_seconds}s")
         print(f"  Cooldown: {self.cooldown_seconds}s between signals")
         track_min = self.signal_track_duration / 60
@@ -482,12 +480,12 @@ async def main():
     """Main entry point."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="ES Futures Absorption Monitor")
+    parser = argparse.ArgumentParser(description="Stock Absorption Monitor")
     parser.add_argument("--host", default="127.0.0.1", help="TWS/Gateway host")
     parser.add_argument("--port", type=int, default=7497, help="TWS/Gateway port")
     parser.add_argument("--client-id", type=int, default=99, help="Client ID")
-    parser.add_argument("--delta", type=int, default=100, help="Delta threshold (contracts)")
-    parser.add_argument("--ticks", type=float, default=0.5, help="Price tick threshold")
+    parser.add_argument("--delta", type=int, default=500, help="Delta threshold (shares)")
+    parser.add_argument("--points", type=float, default=0.10, help="Price point threshold")
     parser.add_argument("--window", type=float, default=5.0, help="Rolling window (seconds)")
 
     args = parser.parse_args()
@@ -496,8 +494,8 @@ async def main():
         host=args.host,
         port=args.port,
         client_id=args.client_id,
-        delta_threshold=args.delta,
-        tick_threshold=args.ticks,
+        min_delta=args.delta,
+        tick_threshold=args.points,
         window_seconds=args.window,
     )
 

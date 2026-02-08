@@ -114,3 +114,21 @@
 2026-02-02 14:16:03 | BUY  | Entry: 7016.50 | Delta: -75 | Max Profit: 0.00 pts | Max Drawdown: 2.25 pts | Profit/DD Ratio: 0.00x
 2026-02-02 14:29:45 | SELL | Entry: 7016.25 | Delta: +110 | Max Profit: 5.25 pts | Max Drawdown: 0.00 pts | Profit/DD Ratio: N/A (no drawdown)
 2026-02-02 14:29:47 | SELL | Entry: 7016.25 | Delta: +116 | Max Profit: 5.25 pts | Max Drawdown: 0.00 pts | Profit/DD Ratio: N/A (no drawdown)
+2026-02-03 09:50:52 | BUY  | Entry: 7005.25 | Delta: -73 | Max Profit: 0.25 pts | Max Drawdown: 11.00 pts | Profit/DD Ratio: 0.02x
+2026-02-03 09:57:44 | BUY  | Entry: 6986.25 | Delta: -91 | Max Profit: 0.25 pts | Max Drawdown: 12.25 pts | Profit/DD Ratio: 0.02x
+2026-02-03 10:01:07 | SELL | Entry: 6974.50 | Delta: +78 | Max Profit: 2.50 pts | Max Drawdown: 0.50 pts | Profit/DD Ratio: 5.00x
+2026-02-03 10:01:08 | SELL | Entry: 6973.75 | Delta: +76 | Max Profit: 1.75 pts | Max Drawdown: 1.25 pts | Profit/DD Ratio: 1.40x
+2026-02-03 10:01:48 | BUY  | Entry: 6972.50 | Delta: -70 | Max Profit: 7.75 pts | Max Drawdown: 4.00 pts | Profit/DD Ratio: 1.94x
+2026-02-03 12:00:08 | BUY  | Entry: 6951.25 | Delta: -81 | Max Profit: 2.25 pts | Max Drawdown: 0.75 pts | Profit/DD Ratio: 3.00x
+2026-02-03 12:00:09 | BUY  | Entry: 6951.25 | Delta: -81 | Max Profit: 2.25 pts | Max Drawdown: 0.75 pts | Profit/DD Ratio: 3.00x
+2026-02-03 14:54:03 | SELL | Entry: 6903.00 | Delta: +86 | Max Profit: 1.75 pts | Max Drawdown: 12.75 pts | Profit/DD Ratio: 0.14x
+2026-02-03 14:54:05 | SELL | Entry: 6903.00 | Delta: +87 | Max Profit: 1.75 pts | Max Drawdown: 13.00 pts | Profit/DD Ratio: 0.13x
+2026-02-05 12:01:59 | BUY  | Entry: 680.49 | Delta: -542 | Max Profit: 0.00 pts | Max Drawdown: 0.03 pts | Profit/DD Ratio: 0.00x
+2026-02-05 12:02:00 | BUY  | Entry: 680.49 | Delta: -542 | Max Profit: 0.00 pts | Max Drawdown: 0.03 pts | Profit/DD Ratio: 0.00x
+2026-02-05 12:02:02 | SELL | Entry: 680.48 | Delta: +873 | Max Profit: 0.12 pts | Max Drawdown: 0.31 pts | Profit/DD Ratio: 0.39x
+2026-02-05 12:02:36 | SELL | Entry: 680.61 | Delta: +846 | Max Profit: 0.25 pts | Max Drawdown: 0.16 pts | Profit/DD Ratio: 1.56x
+2026-02-05 12:03:22 | SELL | Entry: 680.40 | Delta: +712 | Max Profit: 0.00 pts | Max Drawdown: 0.16 pts | Profit/DD Ratio: 0.00x
+2026-02-05 12:03:23 | SELL | Entry: 680.40 | Delta: +711 | Max Profit: 0.00 pts | Max Drawdown: 0.16 pts | Profit/DD Ratio: 0.00x
+2026-02-05 12:03:46 | BUY  | Entry: 680.34 | Delta: -1407 | Max Profit: 0.27 pts | Max Drawdown: 0.75 pts | Profit/DD Ratio: 0.36x
+2026-02-05 12:03:47 | BUY  | Entry: 680.34 | Delta: -1407 | Max Profit: 0.27 pts | Max Drawdown: 0.75 pts | Profit/DD Ratio: 0.36x
+2026-02-05 12:04:56 | BUY  | Entry: 679.88 | Delta: -910 | Max Profit: 0.22 pts | Max Drawdown: 0.00 pts | Profit/DD Ratio: N/A (no drawdown)
