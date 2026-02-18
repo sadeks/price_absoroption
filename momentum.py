@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Futures Absorption Monitor
-Detects passive absorption in futures by analyzing tape data.
+Futures Momentum Monitor
+Detects momentum in futures by analyzing tape data.
 
-Passive Absorption Detection:
-- Sell Absorption (bearish): High positive delta (lots of buying) but price doesn't go up
-  → Sellers are absorbing buy orders = resistance / bearish signal
-- Buy Absorption (bullish): High negative delta (lots of selling) but price doesn't go down
-  → Buyers are absorbing sell orders = support / bullish signal
+Momentum Detection (opposite of absorption):
+- Bullish Momentum: High positive delta (lots of buying) AND price moving UP
+  → Aggressive buyers pushing price higher = bullish continuation
+- Bearish Momentum: High negative delta (lots of selling) AND price moving DOWN
+  → Aggressive sellers pushing price lower = bearish continuation
 """
 
 import asyncio
@@ -47,18 +47,18 @@ class SignalTracker:
     delta: int = 0
 
 
-class AbsorptionMonitor:
-    """Monitors stock tape for passive absorption patterns."""
+class MomentumMonitor:
+    """Monitors stock tape for momentum patterns."""
 
     def __init__(
         self,
         host: str = "127.0.0.1",
         port: int = 7496,
-        client_id: int = 99,
+        client_id: int = 98,
         symbol: str = "ES",
         expiry: str = "",
         exchange: str = "CME",
-        tick_threshold: float = 0.5,
+        min_price_move: float = 10,
         window_seconds: float = 5.0,
         baseline_window_seconds: float = 60.0,
         delta_multiplier: float = 2.0,
@@ -73,7 +73,7 @@ class AbsorptionMonitor:
         self.exchange = exchange
 
         # Detection thresholds
-        self.tick_threshold = tick_threshold  # Max price move (in points) to consider absorption
+        self.min_price_move = min_price_move  # Min price move (in points) to consider momentum
         self.window_seconds = window_seconds  # Rolling window size
         self.baseline_window_seconds = baseline_window_seconds  # Window for calculating average
         self.delta_multiplier = delta_multiplier  # Trigger when delta is Nx the average
@@ -83,7 +83,6 @@ class AbsorptionMonitor:
         # Cooldown tracking
         self.last_buy_signal_time: float = 0
         self.last_sell_signal_time: float = 0
-
 
         # Tick size (0.25 for ES futures)
         self.tick_size = 0.25
@@ -110,13 +109,13 @@ class AbsorptionMonitor:
 
         # Sound files
         self.sounds_dir = os.path.join(os.path.dirname(__file__), "sounds")
-        self.buy_absorption_sound = os.path.join(self.sounds_dir, "buy_absorption.wav")
-        self.sell_absorption_sound = os.path.join(self.sounds_dir, "sell_absorption.wav")
+        self.buy_momentum_sound = os.path.join(self.sounds_dir, "buy_momentum.wav")
+        self.sell_momentum_sound = os.path.join(self.sounds_dir, "sell_momentum.wav")
 
         # Signal analytics tracking
         self.active_signals: list[SignalTracker] = []
         self.signal_track_duration: float = 300.0  # Track for 5 minutes after signal
-        self.analytics_file = os.path.join(os.path.dirname(__file__), "absorption_analytics.txt")
+        self.analytics_file = os.path.join(os.path.dirname(__file__), "momentum_analytics.txt")
 
     async def connect(self) -> bool:
         """Connect to IBKR TWS/Gateway."""
@@ -207,8 +206,8 @@ class AbsorptionMonitor:
         # Prune old ticks
         self._prune_old_ticks()
 
-        # Check for absorption
-        self._check_absorption()
+        # Check for momentum
+        self._check_momentum()
 
         # Update signal analytics with current price
         if self.tape and self.active_signals:
@@ -277,8 +276,8 @@ class AbsorptionMonitor:
         price_change = last_price - first_price
         return price_change / self.tick_size  # Convert to points
 
-    def _check_absorption(self):
-        """Check for absorption patterns and alert."""
+    def _check_momentum(self):
+        """Check for momentum patterns and alert."""
         if len(self.tape) < 2:
             return
 
@@ -298,44 +297,44 @@ class AbsorptionMonitor:
         # Print status periodically
         if now - self.last_status_print >= self.status_interval:
             timestamp = datetime.now().strftime("%H:%M:%S")
-            print(f"[{timestamp}] Delta: {delta:+d} | Avg: {avg_delta:.0f} | Multiple: {multiple:.1f}x | Threshold: {threshold:.0f} ({self.delta_multiplier}x or min {self.min_delta})")
+            print(f"[{timestamp}] Delta: {delta:+d} | Avg: {avg_delta:.0f} | Multiple: {multiple:.1f}x | Threshold: {threshold:.0f} ({self.delta_multiplier}x or min {self.min_delta}) | Price Δ: {price_change_ticks:+.1f} pts")
             self.last_status_print = now
 
-        # Delta-based absorption detection
-        # Price must stay flat (within tick_threshold in either direction)
-        price_stayed_flat = abs(price_change_ticks) <= self.tick_threshold
+        # Momentum detection (opposite of absorption):
+        # Price must be moving significantly (above min_price_move)
+        # AND delta must be in the same direction as price movement
 
-        # Sell Absorption (bearish signal):
-        # Lots of aggressive buying (positive delta) but price not going up
-        if delta >= threshold and price_stayed_flat:
-            # Check cooldown
-            if now - self.last_sell_signal_time >= self.cooldown_seconds:
-                self._alert_sell_absorption(delta, price_change_ticks, current_price, multiple)
-                self.last_sell_signal_time = now
-
-        # Buy Absorption (bullish signal):
-        # Lots of aggressive selling (negative delta) but price not going down
-        elif delta <= -threshold and price_stayed_flat:
+        # Bullish Momentum:
+        # Lots of aggressive buying (positive delta) AND price moving UP
+        if delta >= threshold and price_change_ticks >= self.min_price_move:
             # Check cooldown
             if now - self.last_buy_signal_time >= self.cooldown_seconds:
-                self._alert_buy_absorption(delta, price_change_ticks, current_price, multiple)
+                self._alert_bullish_momentum(delta, price_change_ticks, current_price, multiple)
                 self.last_buy_signal_time = now
 
-    def _alert_sell_absorption(self, delta: int, price_change: float, price: float, multiple: float):
-        """Alert for sell absorption (sellers absorbing buys - bearish)."""
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        print(f"[{timestamp}] 🔴 SELL ABSORPTION @ {price:.2f} | Delta: +{delta} ({multiple:.1f}x avg) | Price Δ: {price_change:+.2f} pts")
-        self._play_sound(self.sell_absorption_sound)
-        # Start tracking for analytics
-        self._start_tracking_signal("SELL", price, delta)
+        # Bearish Momentum:
+        # Lots of aggressive selling (negative delta) AND price moving DOWN
+        elif delta <= -threshold and price_change_ticks <= -self.min_price_move:
+            # Check cooldown
+            if now - self.last_sell_signal_time >= self.cooldown_seconds:
+                self._alert_bearish_momentum(delta, price_change_ticks, current_price, multiple)
+                self.last_sell_signal_time = now
 
-    def _alert_buy_absorption(self, delta: int, price_change: float, price: float, multiple: float):
-        """Alert for buy absorption (buyers absorbing sells - bullish)."""
+    def _alert_bullish_momentum(self, delta: int, price_change: float, price: float, multiple: float):
+        """Alert for bullish momentum (buying + price moving up)."""
         timestamp = datetime.now().strftime("%H:%M:%S")
-        print(f"[{timestamp}] 🟢 BUY ABSORPTION @ {price:.2f} | Delta: {delta} ({multiple:.1f}x avg) | Price Δ: {price_change:+.2f} pts")
-        self._play_sound(self.buy_absorption_sound)
+        print(f"[{timestamp}] 🟢 BULLISH MOMENTUM @ {price:.2f} | Delta: +{delta} ({multiple:.1f}x avg) | Price Δ: {price_change:+.2f} pts")
+        self._play_sound(self.buy_momentum_sound)
         # Start tracking for analytics
         self._start_tracking_signal("BUY", price, delta)
+
+    def _alert_bearish_momentum(self, delta: int, price_change: float, price: float, multiple: float):
+        """Alert for bearish momentum (selling + price moving down)."""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        print(f"[{timestamp}] 🔴 BEARISH MOMENTUM @ {price:.2f} | Delta: {delta} ({multiple:.1f}x avg) | Price Δ: {price_change:+.2f} pts")
+        self._play_sound(self.sell_momentum_sound)
+        # Start tracking for analytics
+        self._start_tracking_signal("SELL", price, delta)
 
     def _update_signal_analytics(self, current_price: float):
         """Update all active signals with current price and finalize expired ones."""
@@ -425,18 +424,18 @@ class AbsorptionMonitor:
             if os.path.exists(sound_file):
                 subprocess.Popen(["afplay", sound_file], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             else:
-                # Fallback to system sound
+                # Fallback to system sounds
                 if "buy" in sound_file.lower():
-                    # Bullish - upward heroic sound
+                    # Bullish - glass ping (sharp, upbeat)
                     subprocess.Popen(
-                        ["afplay", "/System/Library/Sounds/Hero.aiff"],
+                        ["afplay", "/System/Library/Sounds/Glass.aiff"],
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
                     )
                 else:
-                    # Bearish - low submarine dive sound
+                    # Bearish - basso (deep, descending)
                     subprocess.Popen(
-                        ["afplay", "/System/Library/Sounds/Submarine.aiff"],
+                        ["afplay", "/System/Library/Sounds/Basso.aiff"],
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
                     )
@@ -461,9 +460,9 @@ class AbsorptionMonitor:
         # Wait for initial data
         await asyncio.sleep(1)
 
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] Monitoring {contract.symbol} tape...")
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Monitoring {contract.symbol} tape for MOMENTUM...")
         print(f"  Delta: {self.delta_multiplier}x average OR min {self.min_delta} shares")
-        print(f"  Price threshold: {self.tick_threshold} pts")
+        print(f"  Min price move: {self.min_price_move} pts")
         print(f"  Window: {self.window_seconds}s | Baseline: {self.baseline_window_seconds}s")
         print(f"  Cooldown: {self.cooldown_seconds}s between signals")
         track_min = self.signal_track_duration / 60
@@ -485,20 +484,20 @@ async def main():
     """Main entry point."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="Futures Absorption Monitor")
+    parser = argparse.ArgumentParser(description="Futures Momentum Monitor")
     parser.add_argument("--host", default="127.0.0.1", help="TWS/Gateway host")
     parser.add_argument("--port", type=int, default=7496, help="TWS/Gateway port")
-    parser.add_argument("--client-id", type=int, default=99, help="Client ID")
+    parser.add_argument("--client-id", type=int, default=98, help="Client ID")
     parser.add_argument("--symbol", default="ES", help="Futures symbol")
     parser.add_argument("--expiry", default="", help="Contract expiry (YYYYMM), auto-detects if omitted")
     parser.add_argument("--exchange", default="CME", help="Exchange")
     parser.add_argument("--delta", type=int, default=500, help="Delta threshold (contracts)")
-    parser.add_argument("--points", type=float, default=10, help="Price point threshold")
+    parser.add_argument("--points", type=float, default=10, help="Min price move in points")
     parser.add_argument("--window", type=float, default=5.0, help="Rolling window (seconds)")
 
     args = parser.parse_args()
 
-    monitor = AbsorptionMonitor(
+    monitor = MomentumMonitor(
         host=args.host,
         port=args.port,
         client_id=args.client_id,
@@ -506,7 +505,7 @@ async def main():
         expiry=args.expiry,
         exchange=args.exchange,
         min_delta=args.delta,
-        tick_threshold=args.points,
+        min_price_move=args.points,
         window_seconds=args.window,
     )
 
