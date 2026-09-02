@@ -7,30 +7,43 @@ from ib_async import IB, Future, util
 
 CHUNK_SECONDS = 1800  # 30 minutes (IB max for 1-sec bars)
 
+# IB parses our naive `endDateTime` strings 1 hour ahead of the local (CT) time
+# it actually stamps returned bars with (verified empirically: requesting
+# endDateTime "09:30:00" returns bars timestamped 08:00:00-08:29:59). So the
+# window we hand to reqHistoricalData must be 1 hour later than the CT window
+# we actually want the data for.
+REQUEST_TZ_SHIFT = timedelta(hours=1)
+
 
 def rth_bounds(date_str):
-    """Return naive local start and end datetimes for RTH on a given YYYYMMDD date."""
+    """Return naive `endDateTime`-request start/end for premarket (9:00-9:30 ET = 8:00-8:30 CT).
+
+    These are literal request values (what IB expects in endDateTime); the
+    actual CT window the returned bars will land in is this minus
+    REQUEST_TZ_SHIFT (see is_in_window).
+    """
     day = datetime.strptime(date_str, "%Y%m%d")
 
-    start = day.replace(hour=9, minute=30, second=0)  # 9:30 ET = 8:30 CT
-    end = day.replace(hour=16, minute=0, second=0)  # 16:00 ET = 15:00 CT
+    start = day.replace(hour=8, minute=45, second=0)
+    end = day.replace(hour=11, minute=30, second=0)
 
     return start, end
 
 
-def is_rth_local(dt):
-    """Assume dt is in CT (TWS timezone)."""
-    h, m = dt.hour, dt.minute
-    return (h > 8 or (h == 8 and m >= 30)) and (h < 15 or (h == 15 and m == 0))
+def is_in_window(dt, start_local, end_local):
+    """dt (bar.date) comes back in CT; start_local/end_local are request-side, so shift back."""
+    if dt.tzinfo is not None:
+        dt = dt.replace(tzinfo=None)
+    return start_local - REQUEST_TZ_SHIFT <= dt < end_local - REQUEST_TZ_SHIFT
 
 
 async def get_mes_data(start_date: str, end_date: str):
     ib = IB()
     ib.RequestTimeout = 60
-    await ib.connectAsync("127.0.0.1", 7497, clientId=5)
+    await ib.connectAsync("127.0.0.1", 7496, clientId=5)
 
     # Qualify contract
-    contract = Future("MES", "202606", "CME", includeExpired=True)
+    contract = Future("NQ", "202609", "CME", includeExpired=True)
     [contract] = await ib.qualifyContractsAsync(contract)
 
     # Build list of RTH windows for each trading day (local time)
@@ -44,7 +57,7 @@ async def get_mes_data(start_date: str, end_date: str):
             windows.append((start_local, end_local))
         day += timedelta(days=1)
 
-    filename = f"mes_1sec_RTH_{start_date}_to_{end_date}.csv"
+    filename = f"mnq_1sec_RTH_{start_date}_to_{end_date}.csv"
     print(f"Downloading MES 1-sec RTH data from {start_date} to {end_date}")
     print(f"Writing to {filename} (chunks appear as they arrive, not sorted)")
 
@@ -95,7 +108,7 @@ async def get_mes_data(start_date: str, end_date: str):
                 if bars:
                     written = 0
                     for bar in bars:
-                        if bar.date not in seen and is_rth_local(bar.date):
+                        if bar.date not in seen and is_in_window(bar.date, start_local, end_local):
                             seen.add(bar.date)
                             writer.writerow([bar.date, bar.open, bar.high, bar.low, bar.close, bar.volume])
                             written += 1
